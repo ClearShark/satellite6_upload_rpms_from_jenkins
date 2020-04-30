@@ -1,0 +1,373 @@
+# !/usr/bin/python
+import argparse
+import json
+import os
+
+import requests
+
+
+def get_sat6(url, user, passw, headers):
+    """
+    GET param against SAT6 API
+    :param url: SAT6 endpoint
+    :param user: username
+    :param passw: password
+    :param headers: get headers
+    :return: json response
+    """
+
+    try:
+        results = requests.get(
+            url,
+            auth=(user, passw),
+            headers=headers,
+            verify=True
+        ).json()
+    except requests.exceptions.HTTPError as err:
+        raise SystemExit(err)
+    except requests.exceptions.RequestException as e:
+        raise SystemExit(e)
+
+    if results.get('error'):
+        print("Error: %s" % results['error']['message'])
+        exit(0)
+
+    return results
+
+
+def post_sat6(url, user, passw, headers, data):
+    """
+     Performs a POST and passes the data to the URL location
+    :param url: SAT6 endpoint
+    :param user: username
+    :param passw: password
+    :param headers: POST headers
+    :param data: any data params needed
+    :return: json of request
+    """
+    # uncomment for debugging purposes
+    # print("POST Headers: %s" % headers)
+    try:
+        results = requests.post(
+            url,
+            data=data,
+            auth=(user, passw),
+            verify=True,
+            headers=headers,
+        ).json()
+    except requests.exceptions.HTTPError as err:
+        raise SystemExit(err)
+    except requests.exceptions.RequestException as e:
+        raise SystemExit(e)
+
+    if results.get('error'):
+        print ("Error: %s" % results['error']['message'])
+        exit(0)
+
+    return results
+
+
+def put_sat6(url, user, passw, headers, data, params=None):
+    """
+       Performs a PUT request to SAT6 API
+      :param url: SAT6 endpoint
+      :param user: username
+      :param passw: password
+      :param headers: PUT headers
+      :param data: any data params needed
+      :param params: any extra parameters PUT needs (ex. {'offset': 0})
+      :return: json response if any
+      """
+    # uncomment for debugging purposes
+    # print("PUT Headers: %s" % headers)
+    try:
+        results = requests.put(
+            url,
+            auth=(user, passw),
+            data=data,
+            verify=True,
+            params=params,
+            headers=headers
+        )
+    except requests.exceptions.HTTPError as err:
+        raise SystemExit(err)
+    except requests.exceptions.RequestException as e:
+        raise SystemExit(e)
+
+    return results
+
+
+def delete_sat6(url, user, passw, headers, data):
+    """
+    Delete content uploads from tmp directory
+      :param url: SAT6 endpoint
+      :param user: username
+      :param passw: password
+      :param headers: POST headers
+      :param data: any data params needed
+    :return: json response if any
+    """
+
+    try:
+        requests.delete(
+            url,
+            auth=(user, passw),
+            data=data,
+            verify=True,
+            headers=headers,
+        )
+    except requests.exceptions.HTTPError as err:
+        raise SystemExit(err)
+    except requests.exceptions.RequestException as e:
+        raise SystemExit(e)
+
+    return None
+
+
+def get_repo_id(repo, url, user, passw):
+    """
+    get repository id based on name
+    :return: empty string if repo not found
+    """
+    headers = {
+        "Accept": "application/json,version=2",
+        "Content-Type": "application/json"
+    }
+
+    results = get_sat6(url, user, passw, headers)
+
+    for result in results['results']:
+        if result['name'] == repo:
+            return result['id']
+
+    return None
+
+
+def get_rpms(base_path):
+    """
+    List RPMS in RPM_BUILD directory
+    :param base_path: the workspace base path in Jenkins
+    :return: list of files
+    """
+    files = os.listdir(base_path)
+    rpms = []
+
+    for r in files:
+        file_path = os.path.join(base_path, r)
+        if os.path.isfile(file_path) and r.lower().endswith('.rpm'):
+            rpms.append(r)
+
+    return rpms
+
+
+def get_rpm_path(base_path, packages):
+    """
+    Get RPMS file names with absolute path
+    :param base_path: the workspace base path
+    :param packages: packages to get paths for
+    :return: list of files with absolute path
+    """
+    rpms = get_rpms(base_path)
+
+    file_data = []
+
+    for file_name in rpms:
+        if file_name in packages:
+            file_path = os.path.join(base_path, file_name)
+            if os.path.isfile(file_path) and file_path.lower().endswith('.rpm'):
+                file_data.append(file_path)
+
+    return file_data
+
+
+def confirm_packages(url, base_path, user, passw):
+    """
+    COnfirm that the packages have not already been uploaded
+    :param url: SAT6 endpoint
+    :param base_path: Jenkins project workspace absolute path
+    :param user: username
+    :param passw: password
+    :return: files that have not already been uploaded
+    """
+    # check for RPMs generated by Jenkins
+    files = get_rpms(base_path)
+
+    headers = {
+        "Accept": "application/json,version=2",
+        "Content-Type": "application/json"
+    }
+
+    # get complete json list of packages for repo
+    packages_json = get_sat6(url + '/packages', user, passw, headers)
+    packages, not_uploaded = [], []
+
+    # get individual packages from json and append to packages list
+    for package in packages_json['results']:
+        packages.append(package['filename'])
+
+    # if the files on disk(e.g RPMS) are not in the list of packages, add to not uploaded list
+    for f in files:
+        if f not in packages:
+            print("Package not uploaded: %s" % f)
+            not_uploaded.append(f)
+
+    # return list of packages not uploaded that are on disk
+    return not_uploaded
+
+
+def get_job_id(url, user, passw, headers, data):
+    """
+    Request an upload get the job id for the new upload
+    :param url: SAT6 API URL
+    :param user: username
+    :param passw: password
+    :param headers: POST Headers
+    :param data: POST DATA
+    :return: results['upload_id] from request. This is the job_id that is needed for upload and import
+    """
+    results = None
+
+    try:
+        results = post_sat6(url + '/content_uploads', user, passw, headers, data)
+    except Exception as e:
+        print(e)
+        exit(-1)
+
+    return results['upload_id']
+
+
+def upload_rpms(url, user, passw, repo, base_path, packages, exclude_import):
+    """
+    Begin workflow to Upload RPMS
+    :param url: SAT6 endpoint
+    :param user: username
+    :param passw: password
+    :param repo: repository name
+    :param base_path: path to WORKSPACE in jenkins project
+    :param packages: packages confirmed to be uploaded
+    :param exclude_import: skip importing uploads into repo
+    :return:
+    """
+
+    multiform_headers = {
+        "Accept": "application/json,version=2",
+        "Content-Type": "multipart/form-data"
+    }
+
+    headers = {
+        "Accept": "application/json,version=2",
+        "Content-Type": "application/json"
+    }
+
+    # list of tuples to upload
+    files = get_rpm_path(base_path, packages)
+
+    print("Beginning batch upload of: %s" % files)
+
+    # have to upload each RPM individually with its own JOB ID
+    for f in files:
+        print("Getting Job ID from Sat6 for upload of \"%s\"" % f)
+
+        # request job id to perform upload
+        job_id = get_job_id(url, user, passw, headers, data="{}")
+
+        print("Job ID: %s" % job_id)
+
+        file_read = open(f, 'rb').read()
+        file_data = {'content': file_read}
+
+        # errors caught in put_sat6 function
+        put_sat6(url + "/content_uploads/" + str(job_id), user, passw, multiform_headers, data=file_data,
+                 params={'offset': 0})
+
+        path_list = f.split('/')
+        file_name = path_list[-1]
+        print("Upload for %s success!" % file_name)
+
+        if not exclude_import:
+            print("Beginning import into %s repository..." % repo)
+            import_data = json.dumps({"upload_ids": [job_id]})
+            import_json = put_sat6(url + "/import_uploads", user, passw, headers, data=import_data).json()
+
+            if import_json.get('errors'):
+                print(import_json.get('errors'))
+                raise SystemExit
+            elif import_json.get('result') == 'success':
+                print("Import Success!")
+
+        print("Deleting tmp files from Satellite 6 for ID: %s" % job_id)
+        delete_sat6(url + "/content_uploads/" + job_id, user, passw, headers, data="{}")
+        print("%s tmp files removed!" % job_id)
+
+    return True
+
+
+def begin_upload(server, user, passw, repo, exclude_import):
+    """
+    Use this method to begin uploading data
+    :param server: server url endpoint
+    :param user: username to connect to API
+    :param passw: password for user connecting to API
+    :param repo: name of repository to upload to
+    :param exclude_import: skip importing uploads into repo
+    """
+
+    # get workspace path of jenkins project where RPMs are built
+    base_path = os.environ['WORKSPACE'] + '/RPM_BUILD/RPMS/noarch'
+
+    sat6_api = 'https://' + server + '/katello/api/repositories/'
+
+    repo_id = get_repo_id(repo, sat6_api, user, passw)
+
+    print("Repo ID for \"%s\" is: %s" % (repo, repo_id))
+
+    if repo_id:
+        # make url of sat6_api for repositories with repo_id for specific url endpoint
+        url = sat6_api + '/' + str(repo_id)
+        # check if package is already uploaded, returns True if NOT uploaded
+        package_not_uploaded = confirm_packages(url, base_path, user, passw)
+
+        if package_not_uploaded:
+            print("Packages to be uploaded: %s" % package_not_uploaded)
+
+            uploaded = upload_rpms(url, user, passw, repo, base_path, package_not_uploaded, exclude_import)
+
+            if uploaded:
+                print("Upload and import of %s complete" % package_not_uploaded)
+                exit(0)
+        else:
+            print ("Packages already uploaded!")
+            exit(0)
+
+    else:
+        print ("Repo not found")
+        exit(-1)
+
+
+def main():
+    """
+    Get Args and run API
+    """
+
+    parser = argparse.ArgumentParser(description='Upload packages to Satellite 6 through API. '
+                                                 'Specific API documentation can be found at:'
+                                                 ' https://access.redhat.com/documentation/en-us/red_hat_satellite/6.5/html-single/api_guide/index'
+                                                 'Content Upload utilizes the Katello API Specifically')
+
+    parser.add_argument('-s', '--server', dest='server', required=True,
+                        help='server name of SAT 6')
+    parser.add_argument('-u', '--user', dest='user', required=True,
+                        help='USERNAME for API')
+    parser.add_argument('-p', '--password', dest='passw', required=True,
+                        help='PASSWORD for USERNAME')
+    parser.add_argument('-r', '--repo', dest='repo', required=True,
+                        help='Repository Name to upload to')
+    parser.add_argument('-e', '--exclude-import', dest='exclude_import', default=False, action='store_true',
+                        help='Exclude from Importing files to repository after upload')
+    args = parser.parse_args()
+
+    begin_upload(args.server, args.user, args.passw, args.repo, args.exclude_import)
+
+
+if __name__ == "__main__":
+    main()
