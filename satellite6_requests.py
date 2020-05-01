@@ -302,18 +302,16 @@ def upload_rpms(url, user, passw, repo, base_path, packages, exclude_import):
     return True
 
 
-def begin_upload(server, user, passw, repo, exclude_import):
+def begin_upload(server, user, passw, repo, base_path, exclude_import=None):
     """
     Use this method to begin uploading data
+    :param base_path: absolute path to directory of rpms to upload.
     :param server: server url endpoint
     :param user: username to connect to API
     :param passw: password for user connecting to API
     :param repo: name of repository to upload to
     :param exclude_import: skip importing uploads into repo
     """
-
-    # get workspace path of jenkins project where RPMs are built
-    base_path = os.environ['WORKSPACE'] + '/RPM_BUILD/RPMS/noarch'
 
     sat6_api = 'https://' + server + '/katello/api/repositories/'
 
@@ -362,11 +360,14 @@ def main():
                         help='PASSWORD for USERNAME')
     parser.add_argument('-r', '--repo', dest='repo', required=True,
                         help='Repository Name to upload to')
+    parser.add_argument('-b', '--base-path', dest='base_path', required=True,
+                        help='Absolute Path to dir of rpms to upload.')
     parser.add_argument('-e', '--exclude-import', dest='exclude_import', default=False, action='store_true',
                         help='Exclude from Importing files to repository after upload')
+
     args = parser.parse_args()
 
-    begin_upload(args.server, args.user, args.passw, args.repo, args.exclude_import)
+    begin_upload(args.server, args.user, args.passw, args.repo, args.base_path, args.exclude_import)
 
 
 if __name__ == "__main__":
